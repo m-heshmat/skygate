@@ -1,214 +1,241 @@
-# Skygate — Tool-Driven AI Assistant over Excel
+# Junior AI Excel Assistant
 
-A natural-language assistant that **reads, queries, inserts, modifies and deletes** rows
-from two Excel datasets using a **custom tool layer built from scratch in Python** —
-no LangChain, LlamaIndex, AutoGen, CrewAI or any other agent framework.
+A natural-language assistant that can read, query, aggregate, insert, update, and delete data across two Excel files using a custom Python tool layer. **No agent frameworks** (no LangChain, LlamaIndex, AutoGen, CrewAI), free LLM (Gemini), Python only.
 
-> Submission for the *Junior AI Engineer* task.
-> Datasets:
-> - `data/real_estate_listings.xlsx` — U.S. property listings
-> - `data/marketing_campaigns.xlsx` — marketing campaign performance
+## Files it understands
 
----
+| Key | File | Description |
+|---|---|---|
+| `real_estate` | `data/Real Estate Listings.xlsx` | 1,000 U.S. property listings (Listing ID, Property Type, City, State, Bedrooms, Bathrooms, Square Footage, Year Built, List Price, Sale Price, Listing Status). |
+| `marketing` | `data/Marketing Campaigns.xlsx` | 1,000 campaign rows (Campaign ID, Campaign Name, Channel, Start Date, End Date, Budget Allocated, Amount Spent, Impressions, Clicks, Conversions, Revenue Generated). |
+
+The originals are treated as **read-only inputs**. The assistant works on copies under `data/working/` so a bad write never destroys your source data. `/reset` (or `ExcelStore.reset()`) restores from the originals.
 
 ## Quick start
 
-```bat
-git clone <your-fork-url> skygate
-cd skygate
-
-python -m venv .venv
-.venv\Scripts\activate
+```powershell
+python -m venv venv
+venv\Scripts\activate
 pip install -r requirements.txt
 
 copy .env.example .env
-:: edit .env and put your free GROQ_API_KEY in it
+# edit .env and set GEMINI_API_KEY
 
-pytest
-python main.py
+python main.py                    # interactive REPL
+python main.py "your question"    # one-shot
+python main.py --auto-confirm "delete listings in Wyoming"
+streamlit run streamlit_app.py    # web UI
 ```
 
-You'll get a REPL like this:
+Get a free Gemini key at <https://aistudio.google.com/apikey>.
 
-```
-┌── Skygate AI Assistant ──┐
-│ model      = llama-3.3-70b-versatile
-│ listings   = ...real_estate_listings.xlsx
-│ campaigns  = ...marketing_campaigns.xlsx
-│ tools      = 14
-└──────────────────────────┘
-you: average list price by state for active condos
-```
+## Streamlit interface
 
-CLI commands inside the REPL:
+The repo includes a chat-like web UI in `streamlit_app.py`.
 
-| command   | what it does                       |
-|-----------|------------------------------------|
-| `/tools`  | list available tools                |
-| `/verbose`| toggle showing each tool call       |
-| `/reset`  | start a new conversation            |
-| `/help`   | show help                           |
-| `/exit`   | quit                                |
+### Features
 
----
+- Chat UI with persistent session state.
+- DataFrame results rendered as interactive tables.
+- Dry-run previews for write operations with **Confirm** / **Cancel** buttons.
+- Sidebar controls for **Reset working data** and **Clear chat**.
 
-## What the assistant can do
+### Run
 
-### Real estate listings
-- *"Show me the 10 cheapest houses in Texas."*
-- *"How many active listings do we have in California?"*
-- *"What's the average sale price per state?"*
-- *"Add a new listing LST-9001, Townhouse in Boise, 3 bed / 2 bath, 1800 sqft, built 2010, list price 425000, status Active."*
-- *"Mark LST-5012 as Sold and set sale price to 720000."*
-- *"Delete listing LST-5099."*
-
-### Marketing campaigns
-- *"Top 5 campaigns by ROAS."*
-- *"Total spend and revenue by channel."*
-- *"What's the CPA for CMP-8042?"*
-- *"Bump the budget of CMP-8001 to 30000."*
-- *"Delete campaign CMP-8050."*
-
-### Schema introspection
-- *"What fields can I filter on for campaigns?"* → calls `describe_dataset`.
-
----
-
-## Architecture (Clean / Hexagonal)
-
-```
-┌─────────────────────────── presentation/cli ───────────────────────────┐
-│   REPL, formatters                                                     │
-└──────────────────────────────┬─────────────────────────────────────────┘
-                               │  depends on
-┌──────────────────────────────▼──────────────── application ────────────┐
-│  agent/orchestrator   (tool-calling loop, no frameworks)               │
-│  tools/               (Tool, ToolRegistry, JSON schemas)               │
-│  use_cases/           (QueryListings, CreateCampaign, …)               │
-│  ports/llm.py         (LLMClient interface)                            │
-└──────────────────────────────┬─────────────────────────────────────────┘
-                               │  depends on (interfaces only)
-┌──────────────────────────────▼─────────────────── domain ──────────────┐
-│  entities (Listing, Campaign)   value_objects (QuerySpec, …)           │
-│  repositories (ports)           exceptions                             │
-└──────────────────────────────▲─────────────────────────────────────────┘
-                               │  implements
-┌──────────────────────────── infrastructure ────────────────────────────┐
-│  persistence/   ExcelWorkbook, ExcelListingRepository, query_engine    │
-│  llm/           GroqClient (raw httpx)                                 │
-│  config.py      Settings.load()                                        │
-└────────────────────────────────────────────────────────────────────────┘
+```powershell
+venv\Scripts\activate
+pip install -r requirements.txt
+streamlit run streamlit_app.py
 ```
 
-**Dependency rule:** arrows point inward only. The domain depends on
-nothing; infrastructure depends on the domain. Swapping Excel for SQLite
-(or Groq for Gemini) means adding one adapter — no business code changes.
+## What it can do (real examples)
 
-The full repo layout:
+```text
+> Show me 5 condos in Texas under 300000
+18 rows matched, showing 5.
+| Listing ID | Property Type | City        | State | Bedrooms | ... | List Price |
+| LST-5362   | Condo         | San Antonio | Texas |        1 | ... |     48,000 |
+...
 
-```
-skygate/
-├── main.py
-├── data/                                # Excel files live here
-├── src/skygate/
-│   ├── domain/
-│   │   ├── entities/        (Listing, Campaign — Pydantic models)
-│   │   ├── repositories/    (ListingRepository, CampaignRepository ports)
-│   │   ├── value_objects.py (QuerySpec, AggregateSpec, FilterCondition…)
-│   │   └── exceptions.py
-│   ├── application/
-│   │   ├── ports/llm.py     (LLMClient interface)
-│   │   ├── use_cases/       (one class per business operation)
-│   │   ├── tools/           (Tool, ToolRegistry, JSON schemas)
-│   │   ├── agent/           (orchestrator + system prompt)
-│   ├── infrastructure/
-│   │   ├── persistence/     (Excel adapters + shared query engine)
-│   │   ├── llm/             (GroqClient via raw httpx)
-│   │   └── config.py
-│   ├── presentation/cli/    (REPL, formatters)
-│   └── composition_root.py  (single place where DI is wired)
-└── tests/                   (24 unit tests, no network required)
+> Average ROI by channel for campaigns in 2025
+5 rows matched, showing 5.
+| Channel    | avg_roi |
+| Email      |  12.36  |
+| LinkedIn   |   5.46  |
+| Google Ads |   4.88  |
+| Facebook   |   3.72  |
+| Instagram  |   3.35  |
+
+> Top 10 most expensive listings
+1000 rows matched, showing 10.
+
+> Schema of marketing
+File: marketing (1000 rows)
+| column            | dtype          | n_unique | n_null | samples |
+| Channel           | str            |        5 |      0 | Facebook, LinkedIn, ... |
+...
 ```
 
----
+The assistant supports six actions:
 
-## How a turn works
+| Action | What it does |
+|---|---|
+| `schema` | Lists columns, dtypes, uniques, nulls, sample values for a file. |
+| `query` | Filter / sort / project / limit and return rows. |
+| `aggregate` | `group_by` + aggregations (`sum`/`mean`/`median`/`min`/`max`/`count`/`nunique`/`std`) over base or derived columns. |
+| `insert` | Add a new row. Auto-generates IDs in the existing pattern (`LST-####`, `CMP-####`) if not supplied. |
+| `update` | Mutate matching rows. **Refuses** to run with no filter. |
+| `delete` | Remove matching rows. **Refuses** to run with no filter. |
 
-1. CLI calls `AgentOrchestrator.ask(user_input, state)`.
-2. Orchestrator sends `[system, *history]` + tool schemas to `LLMClient`.
-3. If the model returns `tool_calls`, the registry dispatches each one
-   to a `Tool.handler`, which delegates to a use case, which uses a
-   repository through its **port** — never the Excel file directly.
-4. Tool results are appended as `role="tool"` messages and the loop
-   continues until the model returns a plain text reply (or `max_steps=8`).
+Filters use a real operator vocabulary, not just substring/equality:
 
----
-
-## Tools exposed to the model (14 total)
-
-| Domain    | Read                                                      | Write                                            |
-|-----------|-----------------------------------------------------------|--------------------------------------------------|
-| Listings  | `list_listings`, `get_listing`, `aggregate_listings`      | `create_listing`, `update_listing`, `delete_listing` |
-| Campaigns | `list_campaigns`, `get_campaign`, `aggregate_campaigns`, `campaign_kpis` | `create_campaign`, `update_campaign`, `delete_campaign` |
-| Meta      | `describe_dataset`                                        | —                                                |
-
-Every tool input is a JSON Schema, so the model is constrained to
-well-formed arguments. Filters share one schema:
-
-```json
-{ "field": "list_price", "op": "gte", "value": 500000 }
+```
+=, !=, >, >=, <, <=, between, in, not_in,
+contains, starts_with, ends_with, is_null, is_not_null
 ```
 
-Operators: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `in`, `contains`.
+Aggregations support **derived columns** via safe `df.eval()` expressions, e.g.:
 
----
+```text
+roi = `Revenue Generated` / `Amount Spent`
+ctr = `Clicks` / `Impressions`
+sale_to_list = `Sale Price` / `List Price`
+```
 
-## Safety / data integrity
+Aggregations also distinguish **pre-aggregate filters** (`filters` — applied to source rows) from **post-aggregate HAVING** (`having` — applied to grouped rows on metric aliases). So *"only channels with avg_roi > 1"* is a HAVING on the alias, not a filter that would fail because `avg_roi` doesn't exist on the raw data.
 
-- **Atomic writes** — every save goes to a sibling temp `.xlsx`, then `os.replace`.
-  A killed process can't leave a half-written file.
-- **In-process lock** on each `ExcelWorkbook` to serialise read/write.
-- **Pydantic validation** on every entity, on both create and update paths.
-- **Tool sandbox** — handlers can never crash the loop; exceptions become
-  `{ok: false, error: "..."}` payloads the model is told to surface.
-- **Destructive ops are flagged** (`Tool.confirms_write=True`) and the
-  system prompt instructs the model to confirm ambiguous intents.
+## Multi-turn conversations
 
----
+The assistant remembers the last request and result, so follow-ups work without re-stating context:
+
+```text
+> Top 10 campaigns by ROI
+479 rows matched, showing 10.
+...
+
+> only Facebook and Instagram
+176 rows matched, showing 10.
+... (same aggregate, restricted to those two channels)
+
+> why were these selected?
+Explanation: ...
+```
+
+A single LLM call per turn handles all three cases. A small **state-aware follow-up router** (running inside the same call as intent parsing) decides whether the message should:
+
+- `explain_previous` — explain the prior filters/groups, no tool call,
+- `refine_previous` — tweak the prior request (e.g. add a filter, change the limit),
+- `new_request` — start over with a fresh request,
+- `unclear` — ask a clarifying question.
+
+If the router produces a structurally bad request (e.g. a filter without a column), the assistant logs the issue and transparently falls back to a fresh intent parse instead of erroring.
+
+## Architecture
+
+```
+User input
+    │
+    ▼
+ExcelAssistant (orchestrator)
+    │   1. Pulls schemas (cols + dtypes + sample values) for both files
+    │   2. Calls LLM with schema-aware prompt → strict JSON
+    │   3. Validates JSON into a typed ToolRequest
+    │   4. Dispatches to the right tool
+    │
+    ├──► SchemaTool        →  describe a file
+    ├──► QueryTool         →  filter / sort / project / limit
+    ├──► AggregateTool     →  group_by / agg / derived columns
+    ├──► InsertTool        →  add row, coerce dtypes, auto-ID
+    ├──► UpdateTool        →  mutate matching rows (filter required)
+    └──► DeleteTool        →  remove matching rows (filter required)
+                │
+                ▼
+       FilterEngine + ColumnResolver  (operator-aware, fuzzy column names)
+                │
+                ▼
+       ExcelStore (atomic save, working-copy, in-memory cache)
+```
+
+Project layout:
+
+```
+.
+├── main.py                       # CLI (REPL + one-shot)
+├── streamlit_app.py              # Streamlit chat UI
+├── requirements.txt
+├── .env.example
+├── README.md
+├── DECISIONS.md
+├── data/
+│   ├── Real Estate Listings.xlsx     # source (read-only)
+│   ├── Marketing Campaigns.xlsx      # source (read-only)
+│   └── working/                      # mutated copies live here
+├── app/
+│   ├── config.py                 # paths, model name, API key
+│   ├── schemas.py                # ToolRequest, FilterSpec, AggregateSpec, ...
+│   ├── assistant.py              # orchestrator + multi-turn confirmation
+│   ├── llm/
+│   │   ├── client.py             # google-genai client, JSON-mode response
+│   │   └── prompts.py            # schema-aware system prompt + examples
+│   ├── tools/
+│   │   ├── excel_store.py        # atomic save, working-copy, cache
+│   │   ├── column_resolver.py    # fuzzy column name resolution
+│   │   ├── filter_engine.py      # operator-aware boolean masks
+│   │   ├── schema_tool.py
+│   │   ├── query_tool.py
+│   │   ├── aggregate_tool.py
+│   │   ├── insert_tool.py
+│   │   ├── update_tool.py
+│   │   └── delete_tool.py
+│   └── utils/
+│       ├── formatters.py         # tabulate-based result rendering
+│       └── logging_setup.py      # JSONL session log under logs/
+├── tests/
+│   └── test_tools.py             # 17 offline tool-layer tests
+└── logs/                         # per-session JSONL transcripts
+```
+
+## Safety model
+
+Two-layer protection against the LLM doing something destructive:
+
+1. **Static guards in the tools** — `update`/`delete` raise immediately if the filter spec is empty; unknown columns raise `ColumnResolutionError` instead of being silently dropped (the most common cause of "wiped the whole file" bugs); `update`/`insert` coerce values to the target column dtype and surface a clear error on mismatch.
+2. **Dry-run + confirmation in the orchestrator** — every `insert`/`update`/`delete` first returns a preview of what *would* change. Reply `yes` to commit, `no` to cancel. Pass `--auto-confirm` to skip this for scripted runs.
+
+Plus:
+
+- The originals in `data/` are never written to. All mutations go to `data/working/`.
+- Saves are atomic: write to a temp file in the same directory, then `os.replace()`.
+- Every LLM call and every tool result is appended to a per-session JSONL log under `logs/`.
+- LLM-emitted operator and aggregation aliases are normalized at the schema boundary (`gt` → `>`, `avg` → `mean`, `total` → `sum`, etc.) so prompt creativity doesn't break validation.
+- 429 quota-exhausted responses from Gemini are caught and retried once, respecting the server's `retryDelay` hint.
 
 ## Tests
 
-```bat
-pytest
+```powershell
+pip install pytest
+python -m pytest tests/test_tools.py -q
 ```
 
-The suite (24 tests, ~7 s) covers:
-
-- domain validation rules and KPI math
-- the pandas-backed query engine (filter / sort / aggregate)
-- both Excel repositories on a tmp copy of the real dataset
-- the tool registry (success, exception capture, unknown tool)
-- the agent loop with a **scripted fake LLM** (no network)
-
----
+The 18 tests cover the tool layer end-to-end against the real Excel files (no LLM required): operator filters, fuzzy column resolution, the `mask=True` regression for delete, dry-run no-op, atomic save round-trip, ID auto-generation, duplicate-ID rejection, ROI/CTR-style derived aggregations, and HAVING-style post-aggregate filtering on metric aliases.
 
 ## Configuration
 
-Copy `.env.example` to `.env` and fill in:
+`.env`:
 
-```ini
-GROQ_API_KEY=...
-GROQ_URL=https://api.groq.com/openai/v1
-GROQ_MODEL=llama-3.3-70b-versatile
-LISTINGS_XLSX=data/real_estate_listings.xlsx
-CAMPAIGNS_XLSX=data/marketing_campaigns.xlsx
+```env
+GEMINI_API_KEY=your_key_here
+GEMINI_MODEL=gemini-2.5-flash-lite
 ```
 
-Any OpenAI-compatible provider (Groq, OpenRouter, NVIDIA Build, …) works
-by changing `GROQ_URL` and `GROQ_MODEL` — only the URL/model differ.
+The default is `gemini-2.5-flash-lite` because it has the most generous free-tier daily quota for this workload. Any chat-capable Gemini model that supports `response_mime_type=application/json` will work — `gemini-2.5-flash` is smarter but rate-limited to ~20 requests/day on the free tier; `gemini-2.0-flash-lite` is a good alternate quota bucket if you hit 429s.
 
----
+## Known limits
 
-## License
+See `DECISIONS.md` for the full list. Highlights:
 
-MIT.
+- One LLM call per turn (no ReAct loop). The follow-up router shares that single call; if it produces a structurally invalid request, the assistant falls back to a fresh intent parse, which costs one extra call on that turn.
+- Cross-file joins aren't supported (the two files share no key, so this isn't currently a real use case).
+- The `update`/`insert` payloads come from the LLM, so dtype coercion errors will sometimes surface to the user instead of being self-healed.
+- Safe expression engine for derived columns is `pandas.DataFrame.eval()` — arithmetic on column references only, no Python.
+- For aggregate results, the displayed `matched_rows` is the number of *groups* after group-by, not the number of source rows. This is documented in `DECISIONS.md`.
