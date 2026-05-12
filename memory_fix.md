@@ -1,4 +1,4 @@
-# Memory Issue Fix Summary
+# Memory Issue Fix
 
 I fixed the memory issue by changing four files, and each one had a clear role.
 
